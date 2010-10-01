@@ -1,0 +1,10 @@
+--- This file is part of LuaDist project
+
+name = "scintilla"
+version = "2.11"
+
+desc = "Scintilla is a free source code editing component."
+author = "Neil Hodgson"
+license = "MIT style"
+url = "http://www.scintilla.org/"
+maintainer = "Peter Drahoš"
