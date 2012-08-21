@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import with_statement
+from __future__ import unicode_literals
 
 import os, sys, unittest
 
@@ -304,8 +305,8 @@ class XiteWin():
 			self.ed.FocusOn()
 			self.ed.GotoPos(self.ed.Length)
 
-		print(self.test)
 		if self.test:
+			print(self.test)
 			for k in self.cmds:
 				if self.cmds[k] == "Test":
 					user32.PostMessageW(self.win, msgs["WM_COMMAND"], k, 0)
@@ -432,20 +433,22 @@ class XiteWin():
 			self.ed.FocusOn()
 			self.ed.LexerLanguage = "python"
 			self.ed.Lexer = self.ed.SCLEX_PYTHON
-			self.ed.SetKeyWords(0, "class def else for if import print return while")
+			self.ed.SetKeyWords(0, b"class def else for from if import print return while")
 			for style in [k for k in self.ed.k if k.startswith("SCE_P_")]:
-				self.ed.StyleSetFont(self.ed.k[style], "Verdana")
+				self.ed.StyleSetFont(self.ed.k[style], b"Verdana")
 				if "COMMENT" in style:
 					self.ed.StyleSetFore(self.ed.k[style], 127 * 256)
-					self.ed.StyleSetFont(self.ed.k[style], "Comic Sans MS")
+					self.ed.StyleSetFont(self.ed.k[style], b"Comic Sans MS")
 				elif "OPERATOR" in style:
-					print(style, self.ed.k[style])
 					self.ed.StyleSetBold(self.ed.k[style], 1)
 					self.ed.StyleSetFore(self.ed.k[style], 127 * 256 * 256)
 				elif "WORD" in style:
-					print(style, self.ed.k[style])
 					self.ed.StyleSetItalic(self.ed.k[style], 255)
 					self.ed.StyleSetFore(self.ed.k[style], 255 * 256 * 256)
+				elif "TRIPLE" in style:
+					self.ed.StyleSetFore(self.ed.k[style], 0xA0A0)
+				elif "STRING" in style or "CHARACTER" in style:
+					self.ed.StyleSetFore(self.ed.k[style], 0xA000A0)
 				else:
 					self.ed.StyleSetFore(self.ed.k[style], 0)
 
@@ -610,7 +613,7 @@ class XiteWin():
 		print("\n".join(sorted(self.ed.used)))
 
 	def Uncalled(self):
-		print()
+		print("")
 		unused = sorted(self.ed.all.difference(self.ed.used))
 		uu = {}
 		for u in unused:

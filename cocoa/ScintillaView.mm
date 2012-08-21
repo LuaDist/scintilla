@@ -114,7 +114,6 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
   [super resetCursorRects];
   
   // We only have one cursor rect: our bounds.
-  NSRect bounds = [self bounds];
   [self addCursorRect: [self bounds] cursor: mCurrentCursor];
   [mCurrentCursor setOnMouseEntered: YES];
 }
@@ -159,6 +158,7 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
  */
 - (BOOL) acceptsFirstMouse: (NSEvent *) theEvent
 {
+#pragma unused(theEvent)
   return YES;
 }
 
@@ -170,6 +170,19 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 - (BOOL) acceptsFirstResponder
 {
   return YES;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Called by the framework if it wants to show a context menu for the editor.
+ */
+- (NSMenu*) menuForEvent: (NSEvent*) theEvent
+{
+  if (![mOwner respondsToSelector: @selector(menuForEvent:)])
+    return mOwner.backend->CreateContextMenu(theEvent);
+  else
+    return [mOwner menuForEvent: theEvent];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -226,10 +239,15 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
  */
 - (void) insertText: (id) aString
 {
-  // Remove any previously marked text first.
-  [self removeMarkedText];
-  
-  mOwner.backend->InsertText((NSString*) aString);
+	// Remove any previously marked text first.
+	[self removeMarkedText];
+	NSString* newText = @"";
+	if ([aString isKindOfClass:[NSString class]])
+		newText = (NSString*) aString;
+	else if ([aString isKindOfClass:[NSAttributedString class]])
+		newText = (NSString*) [aString string];
+	
+	mOwner.backend->InsertText(newText);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -243,8 +261,8 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 
 - (NSRange) selectedRange
 {
-  int begin = [mOwner getGeneralProperty: SCI_GETSELECTIONSTART parameter: 0];
-  int end = [mOwner getGeneralProperty: SCI_GETSELECTIONEND parameter: 0];
+  long begin = [mOwner getGeneralProperty: SCI_GETSELECTIONSTART parameter: 0];
+  long end = [mOwner getGeneralProperty: SCI_GETSELECTIONEND parameter: 0];
   return NSMakeRange(begin, end - begin);
 }
 
@@ -262,42 +280,46 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 {
   // Since we did not return any valid attribute for marked text (see validAttributesForMarkedText)
   // we can safely assume the passed in text is an NSString instance.
-  NSString* newText = (NSString*) aString;
-  int currentPosition = [mOwner getGeneralProperty: SCI_GETCURRENTPOS parameter: 0];
+	NSString* newText = @"";
+	if ([aString isKindOfClass:[NSString class]])
+		newText = (NSString*) aString;
+	else if ([aString isKindOfClass:[NSAttributedString class]])
+		newText = (NSString*) [aString string];
+
+  long currentPosition = [mOwner getGeneralProperty: SCI_GETCURRENTPOS parameter: 0];
 
   // Replace marked text if there is one.
   if (mMarkedTextRange.length > 0)
   {
     // We have already marked text. Replace that.
     [mOwner setGeneralProperty: SCI_SETSELECTIONSTART
-                     parameter: mMarkedTextRange.location
-                         value: 0];
+                         value: mMarkedTextRange.location];
     [mOwner setGeneralProperty: SCI_SETSELECTIONEND 
-                     parameter: mMarkedTextRange.location + mMarkedTextRange.length
-                         value: 0];
+                         value: mMarkedTextRange.location + mMarkedTextRange.length];
     currentPosition = mMarkedTextRange.location;
   }
 
-  mOwner.backend->InsertText(newText);
+  // Note: Scintilla internally works almost always with bytes instead chars, so we need to take
+  //       this into account when determining selection ranges and such.
+  std::string raw_text = [newText UTF8String];
+  int lengthInserted = mOwner.backend->InsertText(newText);
 
   mMarkedTextRange.location = currentPosition;
-  mMarkedTextRange.length = [newText length];
+  mMarkedTextRange.length = lengthInserted;
     
   // Mark the just inserted text. Keep the marked range for later reset.
-  [mOwner setGeneralProperty: SCI_SETINDICATORCURRENT parameter: INPUT_INDICATOR value: 0];
+  [mOwner setGeneralProperty: SCI_SETINDICATORCURRENT value: INPUT_INDICATOR];
   [mOwner setGeneralProperty: SCI_INDICATORFILLRANGE
                    parameter: mMarkedTextRange.location
                        value: mMarkedTextRange.length];
   
-  // Select the part which is indicated in the given range.
+  // Select the part which is indicated in the given range. It does not scroll the caret into view.
   if (range.length > 0)
   {
     [mOwner setGeneralProperty: SCI_SETSELECTIONSTART
-                     parameter: currentPosition + range.location
-                         value: 0];
+                     value: currentPosition + range.location];
     [mOwner setGeneralProperty: SCI_SETSELECTIONEND 
-                     parameter: currentPosition + range.location + range.length
-                         value: 0];
+                     value: currentPosition + range.location + range.length];
   }
 }
 
@@ -307,7 +329,7 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 {
   if (mMarkedTextRange.length > 0)
   {
-    [mOwner setGeneralProperty: SCI_SETINDICATORCURRENT parameter: INPUT_INDICATOR value: 0];
+    [mOwner setGeneralProperty: SCI_SETINDICATORCURRENT value: INPUT_INDICATOR];
     [mOwner setGeneralProperty: SCI_INDICATORCLEARRANGE
                      parameter: mMarkedTextRange.location
                          value: mMarkedTextRange.length];
@@ -326,11 +348,9 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
   {
     // We have already marked text. Replace that.
     [mOwner setGeneralProperty: SCI_SETSELECTIONSTART
-                     parameter: mMarkedTextRange.location
-                         value: 0];
+                     value: mMarkedTextRange.location];
     [mOwner setGeneralProperty: SCI_SETSELECTIONEND 
-                     parameter: mMarkedTextRange.location + mMarkedTextRange.length
-                         value: 0];
+                     value: mMarkedTextRange.location + mMarkedTextRange.length];
     mOwner.backend->InsertText(@"");
     mMarkedTextRange = NSMakeRange(NSNotFound, 0);
   }
@@ -354,7 +374,8 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
  */
 - (void) keyDown: (NSEvent *) theEvent
 {
-  mOwner.backend->KeyboardInput(theEvent);
+  if (mMarkedTextRange.length == 0)
+	mOwner.backend->KeyboardInput(theEvent);
   NSArray* events = [NSArray arrayWithObject: theEvent];
   [self interpretKeyEvents: events];
 }
@@ -464,6 +485,7 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 
 - (BOOL) prepareForDragOperation: (id <NSDraggingInfo>) sender
 {
+#pragma unused(sender)
   return YES;
 }
 
@@ -481,7 +503,19 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
  */
 - (NSDragOperation) draggingSourceOperationMaskForLocal: (BOOL) flag
 {
-  return NSDragOperationCopy | NSDragOperationMove;
+  return NSDragOperationCopy | NSDragOperationMove | NSDragOperationDelete;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Finished a drag: may need to delete selection.
+ */
+
+- (void)draggedImage:(NSImage *)image endedAt:(NSPoint)screenPoint operation:(NSDragOperation)operation {
+    if (operation == NSDragOperationDelete) {
+        mOwner.backend->WndProc(SCI_CLEAR, 0, 0);
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -501,37 +535,60 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 
 - (void) selectAll: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->SelectAll();
 }
 
 - (void) deleteBackward: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->DeleteBackward();
 }
 
 - (void) cut: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->Cut();
 }
 
 - (void) copy: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->Copy();
 }
 
 - (void) paste: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->Paste();
 }
 
 - (void) undo: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->Undo();
 }
 
 - (void) redo: (id) sender
 {
+#pragma unused(sender)
   mOwner.backend->Redo();
+}
+
+- (BOOL) canUndo
+{
+  return mOwner.backend->CanUndo();
+}
+
+- (BOOL) canRedo
+{
+  return mOwner.backend->CanRedo();
+}
+
+
+- (BOOL) isEditable
+{
+  return mOwner.backend->WndProc(SCI_GETREADONLY, 0, 0) == 0;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -549,6 +606,7 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 @implementation ScintillaView
 
 @synthesize backend = mBackend;
+@synthesize owner   = mOwner;
 
 /**
  * ScintiallView is a composite control made from an NSView and an embedded NSView that is
@@ -580,6 +638,24 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * Receives zoom messages, for example when a "pinch zoom" is performed on the trackpad.
+ */
+- (void) magnifyWithEvent: (NSEvent *) event
+{
+#if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_5
+  CGFloat z = [event magnification];
+  
+  // Zoom out or in 1pt depending on sign of magnification event value (0.0 = no change)
+  if (z <= 0.0)
+    [ScintillaView directCall: self message: SCI_ZOOMOUT wParam: 0 lParam: 0];
+  else if (z >= 0.0)
+    [ScintillaView directCall: self message: SCI_ZOOMIN wParam: 0 lParam: 0];
+#endif
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * Sends a new notification of the given type to the default notification center.
  */
 - (void) sendNotification: (NSString*) notificationName
@@ -591,7 +667,7 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 //--------------------------------------------------------------------------------------------------
 
 /**
- * Called by a connected compontent (usually the info bar) if something changed there.
+ * Called by a connected component (usually the info bar) if something changed there.
  *
  * @param type The type of the notification.
  * @param message Carries the new status message if the type is a status message change.
@@ -604,10 +680,14 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
   switch (type)
   {
     case IBNZoomChanged:
+    {
       // Compute point increase/decrease based on default font size.
-      int fontSize = [self getGeneralProperty: SCI_STYLEGETSIZE parameter: STYLE_DEFAULT];
+      long fontSize = [self getGeneralProperty: SCI_STYLEGETSIZE parameter: STYLE_DEFAULT];
       int zoom = (int) (fontSize * (value - 1));
-      [self setGeneralProperty: SCI_SETZOOM parameter: zoom value: 0];
+      [self setGeneralProperty: SCI_SETZOOM value: zoom];
+      break;
+    }
+    default:
       break;
   };
 }
@@ -617,6 +697,20 @@ NSString *SCIUpdateUINotification = @"SCIUpdateUI";
 - (void) setCallback: (id <InfoBarCommunicator>) callback
 {
   // Not used. Only here to satisfy protocol.
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Prevents drawing of the inner view to avoid flickering when doing many visual updates
+ * (like clearing all marks and setting new ones etc.).
+ */
+- (void) suspendDrawing: (BOOL) suspend
+{
+  if (suspend)
+    [[self window] disableFlushWindow];
+  else
+    [[self window] enableFlushWindow];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -636,7 +730,8 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
     {
       // Parent notification. Details are passed as SCNotification structure.
       SCNotification* scn = reinterpret_cast<SCNotification*>(lParam);
-      editor = reinterpret_cast<InnerView*>(scn->nmhdr.idFrom).owner;
+      ScintillaCocoa *psc = reinterpret_cast<ScintillaCocoa*>(scn->nmhdr.hwndFrom);
+      editor = reinterpret_cast<InnerView*>(psc->ContentView()).owner;
       switch (scn->nmhdr.code)
       {
         case SCN_MARGINCLICK:
@@ -644,8 +739,8 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
           if (scn->margin == 2)
           {
             // Click on the folder margin. Toggle the current line if possible.
-            int line = [editor getGeneralProperty: SCI_LINEFROMPOSITION parameter: scn->position];
-            [editor setGeneralProperty: SCI_TOGGLEFOLD parameter: line value: 0];
+            long line = [editor getGeneralProperty: SCI_LINEFROMPOSITION parameter: scn->position];
+            [editor setGeneralProperty: SCI_TOGGLEFOLD value: line];
           }
           break;
           };
@@ -661,7 +756,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
         {
           // A zoom change happend. Notify info bar if there is one.
           float zoom = [editor getGeneralProperty: SCI_GETZOOM parameter: 0];
-          int fontSize = [editor getGeneralProperty: SCI_STYLEGETSIZE parameter: STYLE_DEFAULT];
+          long fontSize = [editor getGeneralProperty: SCI_STYLEGETSIZE parameter: STYLE_DEFAULT];
           float factor = (zoom / fontSize) + 1;
           [editor->mInfoBar notify: IBNZoomChanged message: nil location: NSZeroPoint value: factor];
           break;
@@ -673,6 +768,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
           NSPoint caretPosition = editor->mBackend->GetCaretPosition();
           [editor->mInfoBar notify: IBNCaretChanged message: nil location: caretPosition value: 0];
           [editor sendNotification: SCIUpdateUINotification];
+          [editor sendNotification: NSTextViewDidChangeSelectionNotification];
           break;
       }
       }
@@ -734,10 +830,21 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
     
     // Setup a special indicator used in the editor to provide visual feedback for 
     // input composition, depending on language, keyboard etc.
-    [self setColorProperty: SCI_INDICSETFORE parameter: INPUT_INDICATOR fromHTML: @"#FF9A00"];
+    [self setColorProperty: SCI_INDICSETFORE parameter: INPUT_INDICATOR fromHTML: @"#FF0000"];
     [self setGeneralProperty: SCI_INDICSETUNDER parameter: INPUT_INDICATOR value: 1];
-    [self setGeneralProperty: SCI_INDICSETSTYLE parameter: INPUT_INDICATOR value: INDIC_ROUNDBOX];
+    [self setGeneralProperty: SCI_INDICSETSTYLE parameter: INPUT_INDICATOR value: INDIC_PLAIN];
     [self setGeneralProperty: SCI_INDICSETALPHA parameter: INPUT_INDICATOR value: 100];
+      
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self
+               selector:@selector(applicationDidResignActive:)
+                   name:NSApplicationDidResignActiveNotification
+                 object:nil];
+      
+    [center addObserver:self
+               selector:@selector(applicationDidBecomeActive:)
+                   name:NSApplicationDidBecomeActiveNotification
+                 object:nil];
   }
   return self;
 }
@@ -753,11 +860,25 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 
 //--------------------------------------------------------------------------------------------------
 
+- (void) applicationDidResignActive: (NSNotification *)note {
+#pragma unused(note)
+    mBackend->ActiveStateChanged(false);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+- (void) applicationDidBecomeActive: (NSNotification *)note {
+#pragma unused(note)
+    mBackend->ActiveStateChanged(true);
+}
+
+//--------------------------------------------------------------------------------------------------
+
 - (void) viewDidMoveToWindow
 {
   [super viewDidMoveToWindow];
   
-  [self layout];
+  [self positionSubViews];
   
   // Enable also mouse move events for our window (and so this view).
   [[self window] setAcceptsMouseMovedEvents: YES];
@@ -768,7 +889,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 /**
  * Used to position and size the parts of the editor (content, scrollers, info bar).
  */
-- (void) layout
+- (void) positionSubViews
 {
   int scrollerWidth = [NSScroller scrollerWidth];
 
@@ -881,7 +1002,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
     [mVerticalScroller setHidden: hideScroller];
     if (!hideScroller)
       [mVerticalScroller setFloatValue: 0];
-    [self layout];
+    [self positionSubViews];
   }
   
   if (!hideScroller)
@@ -924,13 +1045,14 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 - (BOOL) setHorizontalScrollRange: (int) range page: (int) page
 {
   BOOL result = NO;
-  BOOL hideScroller = page >= range;
+  BOOL hideScroller = (page >= range) || 
+    (mBackend->WndProc(SCI_GETWRAPMODE, 0, 0) != SC_WRAP_NONE);
   
   if ([mHorizontalScroller isHidden] != hideScroller)
   {
     result = YES;
     [mHorizontalScroller setHidden: hideScroller];
-    [self layout];
+    [self positionSubViews];
   }
   
   if (!hideScroller)
@@ -969,7 +1091,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
  */
 - (void) scrollerAction: (id) sender
 {
-  float position = [sender floatValue];
+  float position = [sender doubleValue];
   mBackend->DoScroll(position, [sender hitPart], sender == mHorizontalScroller);
 }
 
@@ -981,21 +1103,21 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 - (void) setFrame: (NSRect) newFrame
 {
   [super setFrame: newFrame];
-  [self layout];
+  [self positionSubViews];
 }
 
 //--------------------------------------------------------------------------------------------------
 
 /**
- * Getter for the current text in raw form (no formatting information included).
+ * Getter for the currently selected text in raw form (no formatting information included).
  * If there is no text available an empty string is returned.
  */
 - (NSString*) selectedString
 {
-  NSString *result = nil;
+  NSString *result = @"";
   
   char *buffer(0);
-  const int length = mBackend->WndProc(SCI_GETSELTEXT, 0, 0);
+  const long length = mBackend->WndProc(SCI_GETSELTEXT, 0, 0);
   if (length > 0)
   {
     buffer = new char[length + 1];
@@ -1013,8 +1135,6 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
       buffer = 0;
     }
   }
-  else
-    result = [NSString stringWithUTF8String: ""];
   
   return result;
 }
@@ -1027,10 +1147,10 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
  */
 - (NSString*) string
 {
-  NSString *result = nil;
+  NSString *result = @"";
   
   char *buffer(0);
-  const int length = mBackend->WndProc(SCI_GETLENGTH, 0, 0);
+  const long length = mBackend->WndProc(SCI_GETLENGTH, 0, 0);
   if (length > 0)
   {
     buffer = new char[length + 1];
@@ -1048,8 +1168,6 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
       buffer = 0;
     }
   }
-  else
-    result = [NSString stringWithUTF8String: ""];
   
   return result;
 }
@@ -1067,9 +1185,24 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 
 //--------------------------------------------------------------------------------------------------
 
+- (void) insertString: (NSString*) aString atOffset: (int)offset
+{
+  const char* text = [aString UTF8String];
+  mBackend->WndProc(SCI_ADDTEXT, offset, (long) text);
+}
+
+//--------------------------------------------------------------------------------------------------
+
 - (void) setEditable: (BOOL) editable
 {
   mBackend->WndProc(SCI_SETREADONLY, editable ? 0 : 1, 0);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+- (BOOL) isEditable
+{
+  return mBackend->WndProc(SCI_GETREADONLY, 0, 0) == 0;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1095,35 +1228,6 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 //--------------------------------------------------------------------------------------------------
 
 /**
- * This is a helper method to set a property in the backend, with native parameters.
- *
- * @param property Main property like SCI_STYLESETFORE for which a value is to get.
- * @param parameter Additional info for this property like a parameter or index.
- * @param value The value to be set.
- */
-- (void) setEditorProperty: (int) property wParam: (long) parameter lParam: (long) value
-{
-  mBackend->WndProc(property, parameter, value);
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
- * This is a helper method to get a property in the backend, with native parameters.
- *
- * @param property Main property like SCI_STYLESETFORE for which a value is to get.
- * @param parameter Additional info for this property like a parameter or index.
- * @result A generic value which must be interpreted depending on the property queried.
- */
-- (long) getEditorProperty: (int) property wParam: (long) parameter
-{
-  return mBackend->WndProc(property, parameter, 0);
-}
-
-
-//--------------------------------------------------------------------------------------------------
-
-/**
  * This is a helper method to set properties in the backend, with native parameters.
  *
  * @param property Main property like SCI_STYLESETFORE for which a value is to be set.
@@ -1138,11 +1242,35 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * A simplified version for setting properties which only require one parameter.
+ *
+ * @param property Main property like SCI_STYLESETFORE for which a value is to be set.
+ * @param value The actual value. It depends on the property what this parameter means.
+ */
+- (void) setGeneralProperty: (int) property value: (long) value
+{
+  mBackend->WndProc(property, value, 0);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * This is a helper method to get a property in the backend, with native parameters.
  *
  * @param property Main property like SCI_STYLESETFORE for which a value is to get.
  * @param parameter Additional info for this property like a parameter or index.
+ * @param extra Yet another parameter if needed.
  * @result A generic value which must be interpreted depending on the property queried.
+ */
+- (long) getGeneralProperty: (int) property parameter: (long) parameter extra: (long) extra
+{
+  return mBackend->WndProc(property, parameter, extra);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Convenience function to avoid unneeded extra parameter.
  */
 - (long) getGeneralProperty: (int) property parameter: (long) parameter
 {
@@ -1152,12 +1280,21 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 //--------------------------------------------------------------------------------------------------
 
 /**
- * Very similar to getGeneralProperty:parameter, but allows to specify an additional value
- * which certain actions require.
+ * Convenience function to avoid unneeded parameters.
  */
-- (long) getGeneralProperty: (int) property parameter: (long) parameter extra: (long) extra
+- (long) getGeneralProperty: (int) property
 {
-  return mBackend->WndProc(property, parameter, extra);
+  return mBackend->WndProc(property, 0, 0);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Use this variant if you have to pass in a reference to something (e.g. a text range).
+ */
+- (long) getGeneralProperty: (int) property ref: (const void*) ref
+{
+  return mBackend->WndProc(property, 0, (sptr_t) ref);  
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1230,7 +1367,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
  */
 - (NSColor*) getColorProperty: (int) property parameter: (long) parameter
 {
-  int color = mBackend->WndProc(property, parameter, 0);
+  long color = mBackend->WndProc(property, parameter, 0);
   float red = (color & 0xFF) / 255.0;
   float green = ((color >> 8) & 0xFF) / 255.0;
   float blue = ((color >> 16) & 0xFF) / 255.0;
@@ -1308,6 +1445,17 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * Sets the notification callback
+ */
+- (void) registerNotifyCallback: (intptr_t) windowid value: (Scintilla::SciNotifyFunc) callback
+{
+	mBackend->RegisterNotifyCallback(windowid, callback);
+}
+
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * Sets the new control which is displayed as info bar at the top or bottom of the editor.
  * Set newBar to nil if you want to hide the bar again.
  * When aligned to bottom position then the info bar and the horizontal scroller share the available
@@ -1332,7 +1480,7 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
       mInitialInfoBarWidth = [mInfoBar frame].size.width;
     }
     
-    [self layout];
+    [self positionSubViews];
   }
 }
 
@@ -1347,7 +1495,93 @@ static void notification(intptr_t windowid, unsigned int iMessage, uintptr_t wPa
     [mInfoBar notify: IBNStatusChanged message: text location: NSZeroPoint value: 0];
 }
 
-@end
+//--------------------------------------------------------------------------------------------------
+
+- (NSRange) selectedRange
+{
+  return [mContent selectedRange];
+}
 
 //--------------------------------------------------------------------------------------------------
+
+- (void)insertText: (NSString*)text
+{
+  [mContent insertText: text];
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Searches and marks the first occurance of the given text and optionally scrolls it into view.
+ */
+- (void) findAndHighlightText: (NSString*) searchText
+                    matchCase: (BOOL) matchCase
+                    wholeWord: (BOOL) wholeWord
+                     scrollTo: (BOOL) scrollTo
+                         wrap: (BOOL) wrap
+{
+  // The current position is where we start searching. That is either the end of the current
+  // (main) selection or the caret position. That ensures we do proper "search next" too.
+  long currentPosition = [self getGeneralProperty: SCI_GETCURRENTPOS parameter: 0];
+  long length = [self getGeneralProperty: SCI_GETTEXTLENGTH parameter: 0];
+
+  int searchFlags= 0;
+  if (matchCase)
+    searchFlags |= SCFIND_MATCHCASE;
+  if (wholeWord)
+    searchFlags |= SCFIND_WHOLEWORD;
+
+  Sci_TextToFind ttf;
+  ttf.chrg.cpMin = currentPosition;
+  ttf.chrg.cpMax = length;
+  ttf.lpstrText = (char*) [searchText UTF8String];
+  long position = mBackend->WndProc(SCI_FINDTEXT, searchFlags, (sptr_t) &ttf);
+  
+  if (position < 0 && wrap)
+  {
+    ttf.chrg.cpMin = 0;
+    ttf.chrg.cpMax = currentPosition;
+    position = mBackend->WndProc(SCI_FINDTEXT, searchFlags, (sptr_t) &ttf);
+  }
+  
+  if (position >= 0)
+  {
+    // Highlight the found text.
+    [self setGeneralProperty: SCI_SETSELECTIONSTART
+                       value: position];
+    [self setGeneralProperty: SCI_SETSELECTIONEND
+                       value: position + [searchText length]];
+    
+    if (scrollTo)
+      [self setGeneralProperty: SCI_SCROLLCARET value: 0];
+  }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+- (void) setFontName: (NSString*) font
+                size: (int) size
+                bold: (BOOL) bold
+                italic: (BOOL) italic
+{
+  for (int i = 0; i < 32; i++)
+  {
+    [self setGeneralProperty: SCI_STYLESETFONT
+                   parameter: i
+                       value: (sptr_t)[font UTF8String]];
+    [self setGeneralProperty: SCI_STYLESETSIZE
+                   parameter: i
+                       value: size];
+    [self setGeneralProperty: SCI_STYLESETBOLD
+                   parameter: i
+                       value: bold];
+    [self setGeneralProperty: SCI_STYLESETITALIC
+                   parameter: i
+                       value: italic];
+  }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+@end
 

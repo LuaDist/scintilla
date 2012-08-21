@@ -76,12 +76,12 @@ class TestLexers(unittest.TestCase):
 			lineStart = self.ed.PositionFromLine(line)
 			self.ed.StartStyling(lineStart, mask)
 			self.assertEquals(self.ed.EndStyled, lineStart)
-			self.ed.Colourise(0, lenDocument)
+			self.ed.Colourise(lineStart, lenDocument)
 			progStyled = self.AsStyled()
 			if progStyled != prevStyled:
 				with open(nameNew, "wb") as f:
 					f.write(progStyled)
-				assertEquals(progStyled, prevStyled)
+				self.assertEquals(progStyled, prevStyled)
 				# Give up after one failure
 				return
 
@@ -105,7 +105,7 @@ class TestLexers(unittest.TestCase):
 		self.LexExample("x.vb", b"vb", [b"as dim or string"])
 
 	def testD(self):
-		self.LexExample("x.d", b"d", 
+		self.LexExample("x.d", b"d",
 			[b"keyword1", b"keyword2", b"", b"keyword4", b"keyword5",
 			b"keyword6", b"keyword7"])
 

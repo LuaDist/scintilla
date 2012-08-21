@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import with_statement
+from __future__ import unicode_literals
 
-import ctypes, os, unittest
+import codecs, ctypes, os, sys, unittest
 
 import XiteWin
 
@@ -24,6 +25,13 @@ class TestSimple(unittest.TestCase):
 		self.assertEquals(self.ed.GetStyleAt(0), 0)
 		self.ed.ClearAll()
 		self.assertEquals(self.ed.Length, 0)
+
+	def testDeleteRange(self):
+		self.ed.AddText(5, b"abcde")
+		self.assertEquals(self.ed.Length, 5)
+		self.ed.DeleteRange(1, 2)
+		self.assertEquals(self.ed.Length, 3)
+		self.assertEquals(self.ed.Contents(), b"ade")
 
 	def testAddStyledText(self):
 		self.assertEquals(self.ed.EndStyled, 0)
@@ -210,10 +218,12 @@ class TestSimple(unittest.TestCase):
 				self.assertEquals(self.ed.FindColumn(0, col), 0)
 			elif col == 1:
 				self.assertEquals(self.ed.FindColumn(0, col), 1)
+			elif col == 8:
+				self.assertEquals(self.ed.FindColumn(0, col), 2)
 			elif col == 9:
 				self.assertEquals(self.ed.FindColumn(0, col), 3)
 			else:
-				self.assertEquals(self.ed.FindColumn(0, col), 2)
+				self.assertEquals(self.ed.FindColumn(0, col), 1)
 		self.ed.TabWidth = 4
 		self.assertEquals(self.ed.TabWidth, 4)
 		self.assertEquals(self.ed.GetColumn(0), 0)
@@ -361,12 +371,15 @@ class TestSimple(unittest.TestCase):
 
 	def testLinePositions(self):
 		text = b"ab\ncd\nef"
+		nl = b"\n"
+		if sys.version_info[0] == 3:
+			nl = ord(b"\n")
 		self.ed.AddText(len(text), text)
 		self.assertEquals(self.ed.LineFromPosition(-1), 0)
 		line = 0
 		for pos in range(len(text)+1):
 			self.assertEquals(self.ed.LineFromPosition(pos), line)
-			if pos < len(text) and text[pos] == ord("\n"):
+			if pos < len(text) and text[pos] == nl:
 				line += 1
 
 	def testWordPositions(self):
@@ -638,6 +651,16 @@ class TestMarkers(unittest.TestCase):
 		self.ed.MarkerDelete(1,1)
 		self.assertEquals(self.ed.MarkerLineFromHandle(handle), -1)
 
+	def testTwiceAddedDelete(self):
+		handle = self.ed.MarkerAdd(1,1)
+		self.assertEquals(self.ed.MarkerGet(1), 2)
+		handle2 = self.ed.MarkerAdd(1,1)
+		self.assertEquals(self.ed.MarkerGet(1), 2)
+		self.ed.MarkerDelete(1,1)
+		self.assertEquals(self.ed.MarkerGet(1), 2)
+		self.ed.MarkerDelete(1,1)
+		self.assertEquals(self.ed.MarkerGet(1), 0)
+
 	def testMarkerDeleteAll(self):
 		h1 = self.ed.MarkerAdd(0,1)
 		h2 = self.ed.MarkerAdd(1,2)
@@ -670,6 +693,7 @@ class TestMarkers(unittest.TestCase):
 		self.ed.MarkerDeleteAll(-1)
 
 	def testMarkerNext(self):
+		self.assertEquals(self.ed.MarkerNext(0, 2), -1)
 		h1 = self.ed.MarkerAdd(0,1)
 		h2 = self.ed.MarkerAdd(2,1)
 		self.assertEquals(self.ed.MarkerNext(0, 2), 0)
@@ -678,6 +702,9 @@ class TestMarkers(unittest.TestCase):
 		self.assertEquals(self.ed.MarkerPrevious(0, 2), 0)
 		self.assertEquals(self.ed.MarkerPrevious(1, 2), 0)
 		self.assertEquals(self.ed.MarkerPrevious(2, 2), 2)
+
+	def testMarkerNegative(self):
+		self.assertEquals(self.ed.MarkerNext(-1, 2), -1)
 
 	def testLineState(self):
 		self.assertEquals(self.ed.MaxLineState, 0)
@@ -747,6 +774,10 @@ class TestSearch(unittest.TestCase):
 		self.assertEquals(pos, -1)
 		pos = self.ed.FindBytes(0, self.ed.Length, b"big", 0)
 		self.assertEquals(pos, 2)
+
+	def testFindEmpty(self):
+		pos = self.ed.FindBytes(0, self.ed.Length, b"", 0)
+		self.assertEquals(pos, 0)
 
 	def testCaseFind(self):
 		self.assertEquals(self.ed.FindBytes(0, self.ed.Length, b"big", 0), 2)
@@ -1217,7 +1248,7 @@ class TestAutoComplete(unittest.TestCase):
 		self.ed = self.xite.ed
 		self.ed.ClearAll()
 		self.ed.EmptyUndoBuffer()
-		# 3 lines of 3 characters
+		# 1 line of 3 characters
 		t = b"xxx\n"
 		self.ed.AddText(len(t), t)
 
@@ -1296,6 +1327,163 @@ class TestAutoComplete(unittest.TestCase):
 
 		self.assertEquals(self.ed.AutoCActive(), 0)
 
+class TestDirectAccess(unittest.TestCase):
+
+	def setUp(self):
+		self.xite = XiteWin.xiteFrame
+		self.ed = self.xite.ed
+		self.ed.ClearAll()
+		self.ed.EmptyUndoBuffer()
+
+	def testGapPosition(self):
+		text = b"abcd"
+		self.ed.SetText(len(text), text)
+		self.assertEquals(self.ed.GapPosition, 4)
+		self.ed.TargetStart = 1
+		self.ed.TargetEnd = 1
+		rep = b"-"
+		self.ed.ReplaceTarget(len(rep), rep)
+		self.assertEquals(self.ed.GapPosition, 2)
+
+	def testCharacterPointerAndRangePointer(self):
+		text = b"abcd"
+		self.ed.SetText(len(text), text)
+		characterPointer = self.ed.CharacterPointer
+		rangePointer = self.ed.GetRangePointer(0,3)
+		self.assertEquals(characterPointer, rangePointer)
+		cpBuffer = ctypes.c_char_p(characterPointer)
+		self.assertEquals(cpBuffer.value, text)
+		# Gap will not be moved as already moved for CharacterPointer call
+		rangePointer = self.ed.GetRangePointer(1,3)
+		cpBuffer = ctypes.c_char_p(rangePointer)
+		self.assertEquals(cpBuffer.value, text[1:])
+
+class TestWordChars(unittest.TestCase):
+	def setUp(self):
+		self.xite = XiteWin.xiteFrame
+		self.ed = self.xite.ed
+		self.ed.ClearAll()
+		self.ed.EmptyUndoBuffer()
+
+	def tearDown(self):
+		self.ed.SetCharsDefault()
+
+	def _setChars(self, charClass, chars):
+		""" Wrapper to call self.ed.Set*Chars with the right type
+		@param charClass {str} the character class, "word", "space", etc.
+		@param chars {iterable of int} characters to set
+		"""
+		if sys.version_info.major == 2:
+			# Python 2, use latin-1 encoded str
+			unichars = (unichr(x) for x in chars if x != 0)
+			# can't use literal u"", that's a syntax error in Py3k
+			# uncode() doesn't exist in Py3k, but we never run it there
+			result = unicode("").join(unichars).encode("latin-1")
+		else:
+			# Python 3, use bytes()
+			result = bytes(x for x in chars if x != 0)
+		meth = getattr(self.ed, "Set%sChars" % (charClass.capitalize()))
+		return meth(None, result)
+
+	def assertCharSetsEqual(self, first, second, *args, **kwargs):
+		""" Assert that the two character sets are equal.
+		If either set are an iterable of numbers, convert them to chars
+		first. """
+		first_set = set()
+		for c in first:
+			first_set.add(chr(c) if isinstance(c, int) else c)
+		second_set = set()
+		for c in second:
+			second_set.add(chr(c) if isinstance(c, int) else c)
+		return self.assertEqual(first_set, second_set, *args, **kwargs)
+
+	def testDefaultWordChars(self):
+		# check that the default word chars are as expected
+		import string
+		dataLen = self.ed.GetWordChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWordChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		expected = set(string.digits + string.ascii_letters + '_') | \
+			set(chr(x) for x in range(0x80, 0x100))
+		self.assertCharSetsEqual(data, expected)
+
+	def testDefaultWhitespaceChars(self):
+		# check that the default whitespace chars are as expected
+		import string
+		dataLen = self.ed.GetWhitespaceChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWhitespaceChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		expected = (set(chr(x) for x in (range(0, 0x20))) | set(' ')) - \
+			set(['\r', '\n'])
+		self.assertCharSetsEqual(data, expected)
+
+	def testDefaultPunctuationChars(self):
+		# check that the default punctuation chars are as expected
+		import string
+		dataLen = self.ed.GetPunctuationChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetPunctuationChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		expected = set(chr(x) for x in range(0x20, 0x80)) - \
+			set(string.ascii_letters + string.digits + "\r\n_ ")
+		self.assertCharSetsEqual(data, expected)
+
+	def testCustomWordChars(self):
+		# check that setting things to whitespace chars makes them not words
+		self._setChars("whitespace", range(1, 0x100))
+		dataLen = self.ed.GetWordChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWordChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		expected = set()
+		self.assertCharSetsEqual(data, expected)
+		# and now set something to make sure that works too
+		expected = set(range(1, 0x100, 2))
+		self._setChars("word", expected)
+		dataLen = self.ed.GetWordChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWordChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		self.assertCharSetsEqual(data, expected)
+
+	def testCustomWhitespaceChars(self):
+		# check setting whitespace chars to non-default values
+		self._setChars("word", range(1, 0x100))
+		# we can't change chr(0) from being anything but whitespace
+		expected = set([0])
+		dataLen = self.ed.GetWhitespaceChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWhitespaceChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		self.assertCharSetsEqual(data, expected)
+		# now try to set it to something custom
+		expected = set(range(1, 0x100, 2)) | set([0])
+		self._setChars("whitespace", expected)
+		dataLen = self.ed.GetWhitespaceChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetWhitespaceChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		self.assertCharSetsEqual(data, expected)
+
+	def testCustomPunctuationChars(self):
+		# check setting punctuation chars to non-default values
+		self._setChars("word", range(1, 0x100))
+		expected = set()
+		dataLen = self.ed.GetPunctuationChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetPunctuationChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		self.assertEquals(set(data), expected)
+		# now try to set it to something custom
+		expected = set(range(1, 0x100, 1))
+		self._setChars("punctuation", expected)
+		dataLen = self.ed.GetPunctuationChars(None, None)
+		data = b"\0" * dataLen
+		self.ed.GetPunctuationChars(None, data)
+		self.assertEquals(dataLen, len(data))
+		self.assertCharSetsEqual(data, expected)
 
 #~ import os
 #~ for x in os.getenv("PATH").split(";"):

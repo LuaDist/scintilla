@@ -14,19 +14,19 @@
  */
 
 #include <stdlib.h>
-#include <string.h>
+#include <string>
 #include <stdio.h>
 #include <ctype.h>
 #include <time.h>
 
 #include <vector>
+#include <map>
+
+#include "ILexer.h"
 
 #ifdef SCI_LEXER
 #include "SciLexer.h"
-#include "PropSet.h"
 #include "PropSetSimple.h"
-#include "Accessor.h"
-#include "KeyWords.h"
 #endif
 
 #include "SVector.h"
@@ -57,6 +57,8 @@ extern "C" NSString* ScintillaRecPboardType;
 
 @class ScintillaView;
 
+@class FindHighlightLayer;
+
 /**
  * Helper class to be used as timer target (NSTimer).
  */
@@ -78,7 +80,7 @@ namespace Scintilla {
  * back to the parent. Therefore, there must be a callback handler that acts
  * like a Windows WndProc, where Scintilla can send notifications to. Use
  * ScintillaCocoa::RegisterNotifyHandler() to register such a handler.
- * Messgae format is:
+ * Message format is:
  * <br>
  * WM_COMMAND: HIWORD (wParam) = notification code, LOWORD (wParam) = 0 (no control ID), lParam = ScintillaCocoa*
  * <br>
@@ -116,14 +118,23 @@ private:
   
   int scrollSpeed;
   int scrollTicks;
+  NSTimer* tickTimer;
+  NSTimer* idleTimer;
+	
+  FindHighlightLayer *layerFindIndicator;
+
 protected:
-  NSView* ContentView();
   PRectangle GetClientRectangle();
   Point ConvertPoint(NSPoint point);
   
   virtual void Initialise();
   virtual void Finalise();
+  virtual CaseFolder *CaseFolderForEncoding();
+  virtual std::string CaseMapString(const std::string &s, int caseMapping);
+  virtual void CancelModes();
 public:
+  NSView* ContentView();
+
   ScintillaCocoa(NSView* view);
   virtual ~ScintillaCocoa();
 
@@ -140,6 +151,7 @@ public:
   bool SetIdle(bool on);
   void SetMouseCapture(bool on);
   bool HaveMouseCapture();
+  void ScrollText(int linesToMove);
   void SetVerticalScrollPos();
   void SetHorizontalScrollPos();
   bool ModifyScrollBars(int nMax, int nPage);
@@ -160,6 +172,8 @@ public:
   virtual bool CanPaste();
   virtual void Paste();
   virtual void Paste(bool rectangular);
+  void CTPaint(void* gc, NSRect rc);
+  void CallTipMouseDown(NSPoint pt);
   virtual void CreateCallTipWindow(PRectangle rc);
   virtual void AddToPopUp(const char *label, int cmd = 0, bool enabled = true);
   virtual void ClaimSelection();
@@ -196,12 +210,15 @@ public:
   virtual void Undo();
   virtual void Redo();
   
-  //    virtual OSStatus ContextualMenuClick( HIPoint& location );
-//
-//    virtual OSStatus ActiveStateChanged();
-//
-//    virtual void CallTipClick();
- 
+  virtual NSMenu* CreateContextMenu(NSEvent* event);
+  void HandleCommand(NSInteger command);
+
+  virtual void ActiveStateChanged(bool isActive);
+
+  // Find indicator
+  void ShowFindIndicatorForRange(NSRange charRange, BOOL retaining);
+  void MoveFindIndicatorWithBounce(BOOL bounce);
+  void HideFindIndicator();
 };
 
 

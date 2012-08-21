@@ -34,14 +34,14 @@ extern NSString *SCIUpdateUINotification;
 
   // Set when we are in composition mode and partial input is displayed.
   NSRange mMarkedTextRange;
-  
-  // Caret position when a drag operation started.
-  int mLastPosition;
 }
 
 - (void) dealloc;
 - (void) removeMarkedText;
 - (void) setCursor: (Scintilla::Window::Cursor) cursor;
+
+- (BOOL) canUndo;
+- (BOOL) canRedo;
 
 @property (retain) ScintillaView* owner;
 @end
@@ -52,6 +52,9 @@ extern NSString *SCIUpdateUINotification;
   // The back end is kind of a controller and model in one.
   // It uses the content view for display.
   Scintilla::ScintillaCocoa* mBackend;
+  
+  // The object (eg NSDocument) that controls the ScintillaView.
+  NSObject* mOwner;
   
   // This is the actual content to which the backend renders itself.
   InnerView* mContent;
@@ -66,12 +69,14 @@ extern NSString *SCIUpdateUINotification;
 }
 
 - (void) dealloc;
-- (void) layout;
+- (void) positionSubViews;
 
 - (void) sendNotification: (NSString*) notificationName;
 - (void) notify: (NotificationType) type message: (NSString*) message location: (NSPoint) location
           value: (float) value;
 - (void) setCallback: (id <InfoBarCommunicator>) callback;
+
+- (void) suspendDrawing: (BOOL) suspend;
 
 // Scroller handling
 - (BOOL) setVerticalScrollRange: (int) range page: (int) page;
@@ -85,10 +90,17 @@ extern NSString *SCIUpdateUINotification;
 // NSTextView compatibility layer.
 - (NSString*) string;
 - (void) setString: (NSString*) aString;
+- (void) insertText: (NSString*) aString;
 - (void) setEditable: (BOOL) editable;
+- (BOOL) isEditable;
 - (NSRange) selectedRange;
 
 - (NSString*) selectedString;
+
+- (void)setFontName: (NSString*) font
+               size: (int) size
+               bold: (BOOL) bold
+             italic: (BOOL) italic;
 
 // Native call through to the backend.
 + (sptr_t) directCall: (ScintillaView*) sender message: (unsigned int) message wParam: (uptr_t) wParam
@@ -96,8 +108,12 @@ extern NSString *SCIUpdateUINotification;
 
 // Back end properties getters and setters.
 - (void) setGeneralProperty: (int) property parameter: (long) parameter value: (long) value;
+- (void) setGeneralProperty: (int) property value: (long) value;
+
+- (long) getGeneralProperty: (int) property;
 - (long) getGeneralProperty: (int) property parameter: (long) parameter;
 - (long) getGeneralProperty: (int) property parameter: (long) parameter extra: (long) extra;
+- (long) getGeneralProperty: (int) property ref: (const void*) ref;
 - (void) setColorProperty: (int) property parameter: (long) parameter value: (NSColor*) value;
 - (void) setColorProperty: (int) property parameter: (long) parameter fromHTML: (NSString*) fromHTML;
 - (NSColor*) getColorProperty: (int) property parameter: (long) parameter;
@@ -108,9 +124,17 @@ extern NSString *SCIUpdateUINotification;
 - (void) setLexerProperty: (NSString*) name value: (NSString*) value;
 - (NSString*) getLexerProperty: (NSString*) name;
 
+- (void) registerNotifyCallback: (intptr_t) windowid value: (Scintilla::SciNotifyFunc) callback;
+
 - (void) setInfoBar: (NSView <InfoBarCommunicator>*) aView top: (BOOL) top;
 - (void) setStatusText: (NSString*) text;
 
-@property Scintilla::ScintillaCocoa* backend;
+- (void) findAndHighlightText: (NSString*) searchText
+                    matchCase: (BOOL) matchCase
+                    wholeWord: (BOOL) wholeWord
+                     scrollTo: (BOOL) scrollTo
+                         wrap: (BOOL) wrap;
 
+@property Scintilla::ScintillaCocoa* backend;
+@property (retain) NSObject* owner;
 @end
